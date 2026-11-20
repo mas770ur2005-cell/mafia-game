@@ -173,7 +173,7 @@ function toast(t){ const el=$('#toast'); el.textContent=t; el.classList.remove('
 function vib(p){ try{ navigator.vibrate && navigator.vibrate(p) }catch(e){} }
 const COLORS=['#b23a48','#3a6ea5','#2a9d8f','#8e5ad6','#d17a22','#4f772d','#c2185b','#00838f','#6d4c41','#5c6bc0','#ad1457','#2e7d32','#ef6c00','#455a64'];
 function colorOf(pid){ let h=0; for(const c of pid) h=(h*31+c.charCodeAt(0))>>>0; return COLORS[h%COLORS.length]; }
-function initial(n){ return (String(n).trim()[0]||'؟'); }
+function initial(n){ return (Array.from(String(n).trim())[0]||'؟'); }
 
 // نجوم السما
 (function(){ const sky=$('#sky'); for(let i=0;i<70;i++){ const s=document.createElement('div'); s.className='star'; s.style.top=(Math.random()*70)+'%'; s.style.left=(Math.random()*100)+'%'; s.style.animationDelay=(Math.random()*3)+'s'; if(Math.random()<.2){s.style.width=s.style.height='3px'} sky.appendChild(s);} })();
@@ -295,6 +295,13 @@ function hostHandle(pid, m){
       else if(H.phase==='revenge'){ const n=H.revenge.next; announce('info','😇',[`${P(H.revenge.pid).name} ما اختار حدا يسحبه`]); H.revenge=null; proceed(n); }
       break;
     case 'lobby': if(pid!==H.host) return; backToLobby(); break;
+    case 'addbot': {
+      if(pid!==H.host || H.phase!=='lobby' || H.players.length>=20) return;
+      const used=H.players.map(p=>p.name); const nm=BOT_NAMES.find(n=>!used.includes(n)) || ('بوت '+(H.players.length+1));
+      H.players.push({pid:'bot'+rid(8), name:nm, alive:true, role:null, connected:true, spec:false, bot:true});
+      break;
+    }
+    case 'clearbots': if(pid!==H.host || H.phase!=='lobby') return; H.players=H.players.filter(p=>!p.bot); break;
     case 'kick': if(pid!==H.host || H.phase!=='lobby' || m.target===H.host) return;
       H.players=H.players.filter(p=>p.pid!==m.target); if(conns[m.target]) try{conns[m.target].send({t:'kicked'})}catch(e){} break;
     case 'ackann': return;
@@ -409,14 +416,53 @@ function backToLobby(){
 }
 function hostTimer(){
   clearInterval(hostTick);
-  hostTick=setInterval(()=>{ if(!H || !H.endAt || Date.now()<H.endAt) return;
+  hostTick=setInterval(()=>{ botStep(); if(!H || !H.endAt || Date.now()<H.endAt) return;
     if(H.phase==='day' && H.stage==='talk'){ toVote(); broadcast(); }
     else if(H.phase==='day' && H.stage==='vote'){ endDay(); broadcast(); } },500);
 }
 
+// ---------- البوتات (وضع التجربة) ----------
+const BOT_NAMES=['🤖 أبو سمير','🤖 أم خليل','🤖 الحج عرفات','🤖 سلمى','🤖 أبو العبد','🤖 رهف','🤖 حمودة','🤖 أبو صالح','🤖 تالا','🤖 الأستاذ فايز','🤖 جود','🤖 أبو رامي','🤖 ليان','🤖 كنان','🤖 أبو يوسف','🤖 ميرا','🤖 زياد','🤖 أبو حسن','🤖 نايا'];
+const BOT_LINES=['أنا مواطن والله 😅','{n} من أول اللعبة ساكت… مش مريحني','ليش كلكم بتطلّعوا عليّ؟!','أنا شاكك بـ{n} بصراحة','خلّينا نفكر منطقي يا جماعة','{n} صوته متغيّر اليوم 🤔','أنا رح أصوّت على {n}','لو أنا مافيا كان قتلتكم من زمان 😂','مين اللي انقتل كان شاكك فيه؟ هيك بنعرف المافيا','بصراحة ما عندي حدا لهلأ'];
+const botDue={};
+const rnd=a=>a[Math.floor(Math.random()*a.length)];
+function botStep(){
+  if(!H) return; const now=Date.now();
+  const key=H.phase+'|'+H.round+'|'+(H.stage||'')+'|'+(H.revenge?H.revenge.pid:'');
+  for(const b of H.players){
+    if(!b.bot || b.spec) continue;
+    const k=key+'|'+b.pid;
+    if(botDue[k]===undefined){ botDue[k]=now+1500+Math.random()*3500; continue; }
+    if(botDue[k]===0 || now<botDue[k]) continue;
+    botDue[k]=0; botAct(b);
+  }
+}
+function botAct(b){
+  const a=live(), others=a.filter(p=>p.pid!==b.pid), pickOf=l=>l.length?rnd(l).pid:null;
+  if(H.phase==='intro') return hostHandle(b.pid,{t:'ready'});
+  if(!b.alive) return;
+  if(H.phase==='night'){
+    if(killer()===b){ const t=pickOf(a.filter(p=>!isM(p.role))); if(t) hostHandle(b.pid,{t:'act',kind:'kill',target:t}); }
+    if(b.role==='silencer'){ const t=pickOf(a); if(t) hostHandle(b.pid,{t:'act',kind:'silence',target:t}); }
+    if(b.role==='medic'){ const t=pickOf(a); if(t) hostHandle(b.pid,{t:'act',kind:'save',target:t}); }
+    if(b.role==='sniper' && b.bullet){ const t=Math.random()<.35?pickOf(others):null; hostHandle(b.pid,{t:'act',kind:'shot',target:t||'none'}); }
+    return;
+  }
+  if(H.phase==='day' && H.stage==='talk'){
+    if(b.role==='mayor' && !H.mayorRevealed && Math.random()<.2) hostHandle(b.pid,{t:'reveal'});
+    if(H.silenced!==b.pid && Math.random()<.6 && others.length){ hostHandle(b.pid,{t:'chat',text:rnd(BOT_LINES).replace('{n}',rnd(others).name)}); }
+    return;
+  }
+  if(H.phase==='day' && H.stage==='vote'){
+    const pool = isM(b.role) ? others.filter(p=>!isM(p.role)) : others;
+    const t=pickOf(pool.length?pool:others); if(t) hostHandle(b.pid,{t:'vote',target:t}); return;
+  }
+  if(H.phase==='revenge' && H.revenge && H.revenge.pid===b.pid){ const t=pickOf(others); if(t) hostHandle(b.pid,{t:'revenge',target:t}); }
+}
+
 function viewFor(pid){
   const me=P(pid)||{pid,spec:true,alive:false}, over=H.phase==='over', amM=isM(me.role);
-  const players=H.players.map(p=>({ pid:p.pid, name:p.name, alive:p.alive, spec:p.spec, connected: p.pid===H.host?true:!!p.connected, ready:!!p.ready, pub:!!p.pub,
+  const players=H.players.map(p=>({ pid:p.pid, name:p.name, bot:!!p.bot, alive:p.alive, spec:p.spec, connected: p.pid===H.host?true:!!p.connected, ready:!!p.ready, pub:!!p.pub,
     role: (p.pid===pid || over || (!p.alive && H.settings.reveal && !p.spec) || (amM && isM(p.role)) || p.pub) ? p.role : null }));
   const k=killer();
   let night=null;
@@ -649,6 +695,8 @@ function renderLobby(){
   <div class="card"><h3>🪑 على الطاولة <span class="r">${n} لاعب ${n<7?'· الأفضل 7 وأكثر':''}</span></h3>
     <div class="table">${V.players.map(p=>token(p,{tag: p.pid===V.host?'<span class="mk g">👑 المضيف</span>': amHost?`<button class="ib" style="padding:2px 9px;font-size:12px" onclick="send({t:'kick',target:'${p.pid}'})">إزالة</button>`:''})).join('')}</div>
     ${n<4?`<p class="mut" style="text-align:center">لازم ${4-n} كمان على الأقل عشان تبلّشوا</p>`:''}
+    ${amHost?`<div class="row" style="margin-top:12px"><button onclick="send({t:'addbot'})">🤖 أضف لاعب وهمي</button>${V.players.some(p=>p.bot)?`<button onclick="send({t:'clearbots'})">شيل البوتات</button>`:''}</div>
+    <p class="mut" style="margin:8px 0 0;text-align:center">وضع التجربة: اللاعبين الوهميين بيلعبوا لحالهم — بتقدر تجرّب اللعبة كاملة لوحدك</p>`:''}
   </div>
   <div class="card"><h3>🃏 الكروت ${n<4?'<span class="r">(لـ4 لاعبين)</span>':''}</h3>
     <div class="dist">${Object.entries(cnt).map(([r,c])=>`<span class="${isM(r)?'m':''}">${ROLES[r].i} ${ROLES[r].n}${c>1?' ×'+c:''}</span>`).join('')}</div></div>

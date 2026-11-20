@@ -32,6 +32,7 @@ The Mafia wins when its members equal the remaining town players. The town wins 
 - Private Mafia chat at night, a separate chat for eliminated players
 - Host settings: number of Mafia, toggle each role, timers, reveal roles on death
 - Sound effects and vibration, night/day themes
+- Test mode: the host can add bot players that play on their own, to try the game solo
 
 ## Tech
 Single HTML file with plain JavaScript and CSS. Players connect peer-to-peer with [PeerJS](https://peerjs.com/) (WebRTC). The host's browser runs the game, so the host should keep the page open.
